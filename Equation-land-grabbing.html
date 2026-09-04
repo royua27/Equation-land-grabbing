@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <!-- 아이패드 최적화: 더블 탭 확대 방지 및 모바일 비율 고정 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>수식 땅따먹기 | 결승전 시뮬레이터</title>
+  
+  <!-- 스타일 및 React 구동을 위한 CDN 로드 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+
+  <style>
+    /* 터치 디바이스(아이패드) 조작 피로도 제거 및 쾌적화 설정 */
+    body {
+      -webkit-touch-callout: none; /* 길게 누르기 메뉴 방지 */
+      -webkit-user-select: none;   /* 텍스트 선택 방지 */
+      user-select: none;
+      background-color: #0a0a0a;
+    }
+    button, .cursor-pointer {
+      touch-action: manipulation;  /* 터치 딜레이(300ms) 제거 */
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    // 외부 라이브러리(lucide-react) 의존성을 제거하기 위한 인라인 SVG 아이콘
+    const RefreshCw = ({ size }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>;
+    const Delete = ({ size }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 5H9l-7 7 7 7h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Z"/><line x1="18" x2="12" y1="9" y2="15"/><line x1="12" x2="18" y1="9" y2="15"/></svg>;
+    const Play = ({ size, fill }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill || "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>;
+    const Info = ({ size, className }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>;
+
+    const BOARD_SIZE = 13;
+    const NUMBERS_ALLOWED = [1, 2, 3, 4, 5, 6];
+    const WINNING_SCORE = 50;
+
+    // 유효한 수학식 평가기 (안전한 RPN 파서)
+    const evaluateFormula = (tokens) => {
+      if (tokens.length === 0) return null;
+      
+      for (let i = 0; i < tokens.length - 1; i++) {
+        if (/^[1-6]$/.test(tokens[i]) && /^[1-6]$/.test(tokens[i + 1])) return null;
+      }
+
+      const precedence = { '+': 1, '-': 1, '×': 2, '÷': 2, '^': 3 };
+      const isOperator = (t) => ['+', '-', '×', '÷', '^'].includes(t);
+      
+      let outputQueue = [];
+      let operatorStack = [];
+
+      for (let i = 0; i < tokens.length; i++) {
+        let t = tokens[i];
+        if (/^[1-6]$/.test(t)) {
+          outputQueue.push(parseInt(t, 10));
+        } else if (t === '√') {
+          operatorStack.push(t);
+        } else if (t === '!') {
+          outputQueue.push(t);
+        } else if (isOperator(t)) {
+          while (
+            operatorStack.length > 0 &&
+            operatorStack[operatorStack.length - 1] !== '(' &&
+            (precedence[operatorStack[operatorStack.length - 1]] > precedence[t] ||
+              (precedence[operatorStack[operatorStack.length - 1]] === precedence[t] && t !== '^'))
+          ) {
+            outputQueue.push(operatorStack.pop());
+          }
+          operatorStack.push(t);
+        } else if (t === '(') {
+          operatorStack.push(t);
+        } else if (t === ')') {
+          while (operatorStack.length > 0 && operatorStack[operatorStack.length - 1] !== '(') {
+            outputQueue.push(operatorStack.pop());
+          }
+          if (operatorStack.length === 0) return null; 
+          operatorStack.pop();
+          if (operatorStack.length > 0 && operatorStack[operatorStack.length - 1] === '√') {
+            outputQueue.push(operatorStack.pop());
+          }
+        }
+      }
+
+      while (operatorStack.length > 0) {
+        if (operatorStack[operatorStack.length - 1] === '(') return null;
+        outputQueue.push(operatorStack.pop());
+      }
+
+      let evalStack = [];
+      const factorial = (n) => {
+        if (n < 0 || !Number.isInteger(n)) return NaN;
+        if (n === 0) return 1;
+        let res = 1;
+        for (let i = 1; i <= n; i++) res *= i;
+        return res;
+      };
+
+      for (let t of outputQueue) {
+        if (typeof t === 'number') {
+          evalStack.push(t);
+        } else if (t === '!') {
+          if (evalStack.length < 1) return null;
+          evalStack.push(factorial(evalStack.pop()));
+        } else if (t === '√') {
+          if (evalStack.length < 1) return null;
+          let a = evalStack.pop();
+          if (a < 0) return null;
+          evalStack.push(Math.sqrt(a));
+        } else if (isOperator(t)) {
+          if (evalStack.length < 2) return null;
+          let b = evalStack.pop();
+          let a = evalStack.pop();
+          if (t === '+') evalStack.push(a + b);
+          if (t === '-') evalStack.push(a - b);
+          if (t === '×') evalStack.push(a * b);
+          if (t === '÷') {
+            if (b === 0) return null;
+            evalStack.push(a / b);
+          }
+          if (t === '^') evalStack.push(Math.pow(a, b));
+        }
+      }
+      
+      if (evalStack.length !== 1) return null;
+      const res = evalStack[0];
+      if (Math.abs(res - Math.round(res)) < 0.00001) return Math.round(res);
+      return res;
+    };
+
+    function App() {
+      const [board, setBoard] = useState([]);
+      const [turn, setTurn] = useState(1);
+      const [scores, setScores] = useState({ 1: 1, 2: 1 });
+      const [selection, setSelection] = useState({ start: null, end: null, cells: [], targetNumber: null });
+      const [formula, setFormula] = useState([]);
+      const [message, setMessage] = useState("시작점과 끝점을 터치하여 타깃 넘버를 선택하세요.");
+      const [winner, setWinner] = useState(null);
+
+      const initializeGame = useCallback(() => {
+        const SOLVABLE_TARGETS = [
+          "720", "120", "1296", "3125", "7776", "46656", "15625", "4096", "1024",
+          "1440", "2160", "2880", "3600", "4320", "8640", "17280", "86400", "518400",
+          "14400", "43200", "6480", "256", "512", "2048", "8192", "531441", "6561",
+          "59049", "279936", "1679616", "1000000", "362880", "3628800", "390625",
+          "117649", "823543", "262144", "1048576"
+        ];
+
+        const newBoard = Array.from({ length: BOARD_SIZE }, () =>
+          Array.from({ length: BOARD_SIZE }, () => ({
+            digit: null,
+            owner: 0,
+          }))
+        );
+
+        const targets = [...SOLVABLE_TARGETS].sort(() => Math.random() - 0.5);
+        targets.forEach(target => {
+          const isHorizontal = Math.random() > 0.5;
+          const len = target.length;
+          let placed = false;
+          let attempts = 0;
+
+          while (!placed && attempts < 50) {
+            attempts++;
+            const r = Math.floor(Math.random() * BOARD_SIZE);
+            const c = Math.floor(Math.random() * BOARD_SIZE);
+
+            if (isHorizontal && c + len <= BOARD_SIZE) {
+              let canPlace = true;
+              for (let i = 0; i < len; i++) {
+                if (newBoard[r][c + i].digit !== null && newBoard[r][c + i].digit !== target[i]) {
+                  canPlace = false; break;
+                }
+              }
+              if (canPlace) {
+                for (let i = 0; i < len; i++) { newBoard[r][c + i].digit = target[i]; }
+                placed = true;
+              }
+            } else if (!isHorizontal && r + len <= BOARD_SIZE) {
+              let canPlace = true;
+              for (let i = 0; i < len; i++) {
+                if (newBoard[r + i][c].digit !== null && newBoard[r + i][c].digit !== target[i]) {
+                  canPlace = false; break;
+                }
+              }
+              if (canPlace) {
+                for (let i = 0; i < len; i++) { newBoard[r + i][c].digit = target[i]; }
+                placed = true;
+              }
+            }
+          }
+        });
+
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          for (let c = 0; c < BOARD_SIZE; c++) {
+            if (newBoard[r][c].digit === null) {
+              newBoard[r][c].digit = Math.floor(Math.random() * 10);
+            } else {
+              newBoard[r][c].digit = parseInt(newBoard[r][c].digit, 10);
+            }
+          }
+        }
+
+        newBoard[0][0].owner = 1;
+        newBoard[BOARD_SIZE - 1][BOARD_SIZE - 1].owner = 2;
+        setBoard(newBoard);
+        setScores({ 1: 1, 2: 1 });
+        setTurn(1);
+        setSelection({ start: null, end: null, cells: [], targetNumber: null });
+        setFormula([]);
+        setMessage("게임이 시작되었습니다. P1(파랑)의 턴입니다.");
+        setWinner(null);
+      }, []);
+
+      useEffect(() => {
+        initializeGame();
+      }, [initializeGame]);
+
+      const handleCellClick = (r, c) => {
+        if (winner) return;
+
+        if (!selection.start || (selection.start && selection.end)) {
+          setSelection({ start: { r, c }, end: null, cells: [{ r, c }], targetNumber: null });
+          setMessage("끝점을 터치하세요.");
+        } else {
+          const start = selection.start;
+          const end = { r, c };
+
+          if (start.r !== end.r && start.c !== end.c) {
+            setMessage("오류: 가로 또는 세로 직선이어야 합니다.");
+            setSelection({ start: null, end: null, cells: [], targetNumber: null });
+            return;
+          }
+
+          const minR = Math.min(start.r, end.r);
+          const maxR = Math.max(start.r, end.r);
+          const minC = Math.min(start.c, end.c);
+          const maxC = Math.max(start.c, end.c);
+          const length = Math.max(maxR - minR, maxC - minC) + 1;
+
+          if (length < 3) {
+            setMessage("오류: 타깃 넘버는 최소 3자리 이상이어야 합니다.");
+            setSelection({ start: null, end: null, cells: [], targetNumber: null });
+            return;
+          }
+
+          let valid = true;
+          let targetStr = "";
+          let pathCells = [];
+          let startTouches = false;
+          let endTouches = false;
+
+          const isOwnedOrAdjacent = (tr, tc) => {
+            if (board[tr][tc].owner === turn) return true;
+            const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+            return neighbors.some(([dr, dc]) => {
+              const nr = tr + dr, nc = tc + dc;
+              return nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc].owner === turn;
+            });
+          };
+
+          startTouches = isOwnedOrAdjacent(minR, minC);
+          endTouches = isOwnedOrAdjacent(maxR, maxC);
+
+          if (!startTouches && !endTouches) {
+            setMessage("오류: 시작점이나 끝점이 자신의 땅과 연결되어야 합니다.");
+            setSelection({ start: null, end: null, cells: [], targetNumber: null });
+            return;
+          }
+
+          if (minR === maxR) {
+            for (let i = minC; i <= maxC; i++) {
+              pathCells.push({ r: minR, c: i });
+              targetStr += board[minR][i].digit;
+              if (board[minR][i].owner === (turn === 1 ? 2 : 1)) valid = false;
+            }
+          } else {
+            for (let i = minR; i <= maxR; i++) {
+              pathCells.push({ r: i, c: minC });
+              targetStr += board[i][minC].digit;
+              if (board[i][minC].owner === (turn === 1 ? 2 : 1)) valid = false;
+            }
+          }
+
+          if (!valid) {
+            setMessage("오류: 상대방의 땅을 통과할 수 없습니다.");
+            setSelection({ start: null, end: null, cells: [], targetNumber: null });
+            return;
+          }
+
+          setSelection({ start, end, cells: pathCells, targetNumber: parseInt(targetStr, 10) });
+          setMessage(`타깃 넘버: ${parseInt(targetStr, 10)} - 수식을 완성하세요.`);
+          setFormula([]);
+        }
+      };
+
+      const handleFormulaInput = (token) => {
+        if (winner || !selection.targetNumber) return;
+        setFormula((prev) => [...prev, token]);
+      };
+
+      const handleBackspace = () => {
+        setFormula((prev) => prev.slice(0, -1));
+      };
+
+      const clearSelection = () => {
+        setSelection({ start: null, end: null, cells: [], targetNumber: null });
+        setFormula([]);
+        setMessage("선택이 취소되었습니다.");
+      };
+
+      const getUsageCount = (num) => {
+        return formula.filter((t) => t === String(num)).length;
+      };
+
+      const submitFormula = () => {
+        if (!selection.targetNumber) return;
+        
+        const result = evaluateFormula(formula);
+        if (result === null || Number.isNaN(result)) {
+          setMessage("오류: 유효하지 않은 수식입니다.");
+          return;
+        }
+
+        if (result === selection.targetNumber) {
+          const newBoard = [...board];
+          let gained = 0;
+          selection.cells.forEach(({ r, c }) => {
+            if (newBoard[r][c].owner !== turn) {
+              newBoard[r][c] = { ...newBoard[r][c], owner: turn };
+              gained++;
+            }
+          });
+          
+          const newScores = { ...scores, [turn]: scores[turn] + gained };
+          setBoard(newBoard);
+          setScores(newScores);
+
+          if (newScores[turn] >= WINNING_SCORE) {
+            setWinner(turn);
+            setMessage(`게임 종료! Player ${turn} 승리!`);
+          } else {
+            const nextTurn = turn === 1 ? 2 : 1;
+            setTurn(nextTurn);
+            setMessage(`정답입니다! Player ${nextTurn}의 턴입니다.`);
+            setSelection({ start: null, end: null, cells: [], targetNumber: null });
+            setFormula([]);
+          }
+        } else {
+          setMessage(`오답입니다. 수식 결과: ${result}`);
+        }
+      };
+
+      const isCellSelected = (r, c) => selection.cells.some(cell => cell.r === r && cell.c === c);
+      const currentPreview = evaluateFormula(formula);
+
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (winner || !selection.targetNumber) return;
+          const key = e.key;
+          if (['1', '2', '3', '4', '5', '6'].includes(key)) {
+            if (formula.filter((t) => t === key).length < 2) setFormula((prev) => [...prev, key]);
+          } else if (key === '+') setFormula((prev) => [...prev, '+']);
+          else if (key === '-') setFormula((prev) => [...prev, '-']);
+          else if (key === '*') setFormula((prev) => [...prev, '×']);
+          else if (key === '/') { e.preventDefault(); setFormula((prev) => [...prev, '÷']); }
+          else if (key === '^') setFormula((prev) => [...prev, '^']);
+          else if (key === '!') setFormula((prev) => [...prev, '!']);
+          else if (key === '(') setFormula((prev) => [...prev, '(']);
+          else if (key === ')') setFormula((prev) => [...prev, ')']);
+          else if (key.toLowerCase() === 'r') setFormula((prev) => [...prev, '√']);
+          else if (key === 'Backspace') setFormula((prev) => prev.slice(0, -1));
+          else if (key === 'Enter') submitFormula();
+          else if (key === 'Escape') clearSelection();
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [winner, selection.targetNumber, formula, board, turn, scores]);
+
+      return (
+        <div className="min-h-screen text-neutral-200 font-sans p-2 sm:p-4 flex flex-col items-center">
+          <header className="w-full max-w-4xl flex justify-between items-center mb-4 sm:mb-6 bg-neutral-900 p-3 sm:p-4 rounded-xl border border-neutral-800">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight">수식 땅따먹기</h1>
+            <button onClick={initializeGame} className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-xs sm:text-sm transition">
+              <RefreshCw size={16} /> 리셋
+            </button>
+          </header>
+
+          <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-4 sm:gap-6">
+            <div className="flex-1 flex flex-col items-center select-none">
+              <div className="w-full flex justify-between mb-4">
+                <div className={`px-4 sm:px-6 py-2 sm:py-3 rounded-lg border-2 ${turn === 1 ? 'border-blue-500 bg-blue-950' : 'border-neutral-800 bg-neutral-900'}`}>
+                  <h2 className="text-blue-400 font-bold mb-0.5 text-sm sm:text-base">P1 (Blue)</h2>
+                  <p className="text-xl sm:text-2xl font-mono">{scores[1]} / 50</p>
+                </div>
+                <div className={`px-4 sm:px-6 py-2 sm:py-3 rounded-lg border-2 text-right ${turn === 2 ? 'border-red-500 bg-red-950' : 'border-neutral-800 bg-neutral-900'}`}>
+                  <h2 className="text-red-400 font-bold mb-0.5 text-sm sm:text-base">P2 (Red)</h2>
+                  <p className="text-xl sm:text-2xl font-mono">{scores[2]} / 50</p>
+                </div>
+              </div>
+
+              <div className="grid gap-[1px] sm:gap-[2px] bg-neutral-800 p-1 rounded-xl shadow-2xl w-full max-w-[500px]" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))` }}>
+                {board.map((row, r) =>
+                  row.map((cell, c) => (
+                    <div
+                      key={`${r}-${c}`}
+                      onClick={() => handleCellClick(r, c)}
+                      className={`
+                        aspect-square flex items-center justify-center font-mono font-bold text-base sm:text-lg cursor-pointer rounded-sm transition-colors
+                        ${cell.owner === 1 ? 'bg-blue-600 text-white' : cell.owner === 2 ? 'bg-red-600 text-white' : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-700'}
+                        ${isCellSelected(r, c) ? 'ring-2 ring-yellow-400 ring-inset opacity-90 brightness-150' : ''}
+                      `}
+                    >
+                      {cell.digit}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="w-full lg:w-96 flex flex-col gap-4">
+              <div className="bg-neutral-900 p-3 sm:p-4 rounded-xl border border-neutral-800">
+                <div className="flex items-start gap-2 mb-2 text-neutral-400">
+                  <Info size={18} className="mt-0.5 shrink-0" />
+                  <p className="text-sm break-keep">{message}</p>
+                </div>
+                {selection.targetNumber && (
+                  <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-neutral-950 rounded-lg border border-neutral-800">
+                    <p className="text-xs text-neutral-500 mb-1 uppercase tracking-wider">Target Number</p>
+                    <p className="text-2xl sm:text-3xl font-mono font-bold text-yellow-400">{selection.targetNumber.toLocaleString()}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-neutral-900 p-3 sm:p-4 rounded-xl border border-neutral-800 flex-1 flex flex-col">
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-sm text-neutral-400">수식 입력기</p>
+                  <button onClick={clearSelection} className="text-xs px-2 py-1 bg-neutral-800 hover:bg-neutral-700 rounded transition">취소</button>
+                </div>
+                
+                <div className="min-h-[4rem] p-3 bg-neutral-950 rounded-lg border border-neutral-800 mb-2 font-mono text-lg sm:text-xl flex flex-wrap items-center gap-1">
+                  {formula.length === 0 ? <span className="text-neutral-600">수식을 입력하세요</span> : formula.map((t, i) => (
+                    <span key={i} className="text-white">{t}</span>
+                  ))}
+                </div>
+
+                <div className="flex justify-end mb-4 px-2 items-center gap-2">
+                  <span className="text-sm text-neutral-500">=</span>
+                  <span className={`text-lg sm:text-xl font-mono font-bold ${currentPreview === selection.targetNumber ? 'text-green-400' : 'text-neutral-400'}`}>
+                    {currentPreview !== null ? currentPreview.toLocaleString() : '?'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-2 mb-3 sm:mb-4">
+                  {NUMBERS_ALLOWED.map((num) => {
+                    const used = getUsageCount(num);
+                    const disabled = used >= 2 || !selection.targetNumber;
+                    return (
+                      <button
+                        key={`num-${num}`}
+                        onClick={() => handleFormulaInput(String(num))}
+                        disabled={disabled}
+                        className={`
+                          py-2 sm:py-3 rounded-lg font-bold text-base sm:text-lg transition
+                          ${disabled ? 'bg-neutral-800 text-neutral-600 cursor-not-allowed' : 'bg-neutral-700 active:bg-neutral-600 text-white'}
+                        `}
+                      >
+                        {num}
+                        <div className="text-[9px] sm:text-[10px] font-normal text-neutral-400 mt-0.5">사용: {used}/2</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-3 sm:mb-4">
+                  {['+', '-', '×', '÷', '^', '√', '(', ')', '!'].map((op) => (
+                    <button
+                      key={op}
+                      onClick={() => handleFormulaInput(op)}
+                      disabled={!selection.targetNumber}
+                      className="py-1.5 sm:py-2 bg-neutral-800 active:bg-neutral-700 text-white font-mono rounded-lg transition disabled:opacity-50"
+                    >
+                      {op}
+                    </button>
+                  ))}
+                  <button
+                    onClick={handleBackspace}
+                    disabled={formula.length === 0}
+                    className="py-1.5 sm:py-2 col-span-3 bg-neutral-800 active:bg-red-900/50 text-red-400 flex items-center justify-center rounded-lg transition disabled:opacity-50"
+                  >
+                    <Delete size={20} />
+                  </button>
+                </div>
+
+                <button
+                  onClick={submitFormula}
+                  disabled={!selection.targetNumber || formula.length === 0}
+                  className="mt-auto w-full py-3 sm:py-4 bg-yellow-500 active:bg-yellow-400 text-neutral-950 font-bold text-base sm:text-lg rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:bg-neutral-800 disabled:text-neutral-500"
+                >
+                  <Play size={20} fill="currentColor" /> 정답 제출
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
