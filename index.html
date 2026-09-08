@@ -552,12 +552,11 @@
                         textClass = "text-white";
                       }
 
-                      // 선택 영역 붉은색 테두리 효과 강조
                       let selectionStyles = "";
                       if (selected) {
-                        bgClass = "bg-red-900 shadow-inner";
-                        textClass = "text-white font-black drop-shadow-md";
-                        selectionStyles = "ring-[3px] ring-red-500 ring-inset z-10 scale-[1.05]";
+                        bgClass = "bg-yellow-400 shadow-inner";
+                        textClass = "text-black font-black drop-shadow-sm";
+                        selectionStyles = "ring-[3px] ring-yellow-300 ring-inset z-10 scale-[1.05]";
                       } else if (startPulsing) {
                         selectionStyles = "ring-2 ring-yellow-400 ring-inset z-10 animate-pulse bg-yellow-900/30";
                       }
